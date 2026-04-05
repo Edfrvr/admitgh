@@ -1,0 +1,235 @@
+/*
+  AdmitGH Prototype — Reference file for Claude Code
+  This is a working React component with ALL features.
+  Claude Code should extract data, types, logic, and UI patterns from this file
+  and rebuild them as proper Next.js components.
+  
+  DO NOT use this file directly in the Next.js app.
+  Instead, use it as a reference for:
+  - Data structures (UNIVERSITIES, PROGRAMS, etc.)
+  - UI component patterns (Tag, Card, GoldButton)
+  - Feature logic (aggregate calculation, matching, what-if)
+  - Page layouts (dashboard, university detail, etc.)
+*/
+
+// ══════════ DATA (extract to lib/data.ts) ══════════
+
+const GRADES = ["A1", "B2", "B3", "C4", "C5", "C6", "D7", "E8", "F9"];
+const GRADE_VALUES = { A1: 1, B2: 2, B3: 3, C4: 4, C5: 5, C6: 6, D7: 7, E8: 8, F9: 9 };
+const CORE_SUBJECTS = ["English Language", "Core Mathematics", "Integrated Science", "Social Studies"];
+
+const SHS_PROGRAMS = {
+  "General Science": ["Physics", "Chemistry", "Biology", "Elective Mathematics", "ICT", "Geography", "Computing"],
+  "General Arts": ["Literature in English", "Government", "History", "Economics", "Geography", "French", "Christian Religious Studies", "Ghanaian Language"],
+  "Business": ["Financial Accounting", "Business Management", "Economics", "Cost Accounting", "Elective Mathematics", "ICT"],
+  "Visual Arts": ["Graphic Design", "Picture Making", "Sculpture", "Textiles", "Ceramics", "Leatherwork"],
+  "Home Economics": ["Food & Nutrition", "Management in Living", "Textiles", "Chemistry", "Biology"],
+  "Agricultural Science": ["General Agriculture", "Animal Husbandry", "Chemistry", "Physics", "Biology", "Elective Mathematics"],
+  "Technical": ["Technical Drawing", "Auto Mechanics", "Building Construction", "Woodwork", "Metalwork", "Applied Electricity"],
+};
+
+const UNIVERSITIES = [
+  {
+    id: 1, name: "University of Ghana", abbr: "UG", city: "Legon, Accra",
+    founded: 1948, size: "~40,000", email: "admissions@ug.edu.gh",
+    phone: "+233 302 213820", site: "https://www.ug.edu.gh",
+    apply: "https://admission.ug.edu.gh", window: "Jan — Apr",
+    motto: "Integri Procedamus", deadlineDate: "2026-04-30",
+    courses: [
+      { title: "Bachelor of Medicine", cutoff: 8, needs: ["Biology", "Chemistry", "Physics"], dept: "Medicine", careers: "Doctor, Surgeon, Researcher" },
+      { title: "BSc Computer Science", cutoff: 12, needs: ["Elective Mathematics"], dept: "Math Sciences", careers: "Software Engineer, Data Scientist" },
+      { title: "BSc Nursing", cutoff: 14, needs: ["Biology", "Chemistry"], dept: "Nursing", careers: "Nurse, Midwife, Health Admin" },
+      { title: "BA Law (LLB)", cutoff: 10, needs: [], dept: "Law", careers: "Lawyer, Judge, Legal Consultant" },
+      { title: "BSc Engineering", cutoff: 12, needs: ["Elective Mathematics", "Physics"], dept: "Engineering", careers: "Engineer, Project Manager" },
+      { title: "BA Economics", cutoff: 14, needs: ["Economics"], dept: "Social Sciences", careers: "Economist, Analyst, Policy Advisor" },
+      { title: "BBA Accounting", cutoff: 16, needs: ["Financial Accounting", "Economics"], dept: "Business", careers: "Accountant, Auditor, CFO" },
+      { title: "BSc Pharmacy", cutoff: 10, needs: ["Biology", "Chemistry", "Elective Mathematics"], dept: "Pharmacy", careers: "Pharmacist, Researcher" },
+      { title: "BA Political Science", cutoff: 16, needs: [], dept: "Social Sciences", careers: "Diplomat, Policy Analyst" },
+      { title: "BA English", cutoff: 18, needs: ["Literature in English"], dept: "Arts", careers: "Writer, Journalist, Teacher" },
+      { title: "BA Psychology", cutoff: 16, needs: [], dept: "Social Sciences", careers: "Psychologist, HR, Counselor" },
+    ],
+  },
+  {
+    id: 2, name: "KNUST", abbr: "KNUST", city: "Kumasi",
+    founded: 1952, size: "~75,000", email: "admissions@knust.edu.gh",
+    phone: "+233 322 060137", site: "https://www.knust.edu.gh",
+    apply: "https://apps.knust.edu.gh/admissions", window: "Jan — Mar",
+    motto: "Leadership in Science & Technology", deadlineDate: "2026-03-31",
+    courses: [
+      { title: "BSc Medicine", cutoff: 8, needs: ["Biology", "Chemistry", "Physics"], dept: "Health Sciences", careers: "Doctor, Surgeon" },
+      { title: "BSc Computer Engineering", cutoff: 10, needs: ["Elective Mathematics", "Physics"], dept: "Engineering", careers: "Software/Hardware Engineer" },
+      { title: "BSc Pharmacy", cutoff: 10, needs: ["Biology", "Chemistry", "Elective Mathematics"], dept: "Pharmacy", careers: "Pharmacist" },
+      { title: "BSc Architecture", cutoff: 14, needs: ["Elective Mathematics", "Physics"], dept: "Built Environment", careers: "Architect, Urban Planner" },
+      { title: "BSc Mechanical Eng.", cutoff: 12, needs: ["Elective Mathematics", "Physics"], dept: "Engineering", careers: "Mechanical Engineer" },
+      { title: "BSc Actuarial Science", cutoff: 10, needs: ["Elective Mathematics"], dept: "Science", careers: "Actuary, Risk Analyst" },
+      { title: "BSc Electrical Eng.", cutoff: 12, needs: ["Elective Mathematics", "Physics"], dept: "Engineering", careers: "Electrical Engineer" },
+      { title: "BBA Accounting", cutoff: 18, needs: ["Financial Accounting"], dept: "Business", careers: "Accountant, Auditor" },
+    ],
+  },
+  {
+    id: 3, name: "University of Cape Coast", abbr: "UCC", city: "Cape Coast",
+    founded: 1962, size: "~75,000", email: "admissions@ucc.edu.gh",
+    phone: "+233 332 132480", site: "https://www.ucc.edu.gh",
+    apply: "https://admissions.ucc.edu.gh", window: "Feb — May",
+    motto: "Truth Our Guiding Light", deadlineDate: "2026-05-31",
+    courses: [
+      { title: "B.Ed Basic Education", cutoff: 22, needs: [], dept: "Education", careers: "Teacher, Education Admin" },
+      { title: "BSc Nursing", cutoff: 14, needs: ["Biology", "Chemistry"], dept: "Health Sciences", careers: "Nurse, Midwife" },
+      { title: "BSc Mathematics", cutoff: 16, needs: ["Elective Mathematics"], dept: "Science", careers: "Mathematician, Data Analyst" },
+      { title: "BA Economics", cutoff: 18, needs: ["Economics"], dept: "Social Sciences", careers: "Economist, Banker" },
+      { title: "BSc Optometry", cutoff: 12, needs: ["Biology", "Physics"], dept: "Health Sciences", careers: "Optometrist" },
+      { title: "Bachelor of Commerce", cutoff: 18, needs: ["Financial Accounting", "Economics"], dept: "Business", careers: "Business Manager" },
+      { title: "BSc Dietetics", cutoff: 16, needs: ["Biology", "Chemistry"], dept: "Health Sciences", careers: "Dietitian, Nutritionist" },
+    ],
+  },
+  {
+    id: 4, name: "Univ. for Development Studies", abbr: "UDS", city: "Tamale",
+    founded: 1992, size: "~25,000", email: "admissions@uds.edu.gh",
+    phone: "+233 372 022078", site: "https://www.uds.edu.gh",
+    apply: "https://admissions.uds.edu.gh", window: "Feb — May",
+    motto: "Knowledge for Service", deadlineDate: "2026-05-31",
+    courses: [
+      { title: "Bachelor of Medicine", cutoff: 12, needs: ["Biology", "Chemistry"], dept: "Medicine", careers: "Doctor" },
+      { title: "BSc Agriculture Tech", cutoff: 24, needs: ["General Agriculture"], dept: "Agriculture", careers: "Agronomist, Farm Manager" },
+      { title: "BSc Community Nutrition", cutoff: 20, needs: ["Biology", "Chemistry"], dept: "Health Sciences", careers: "Nutritionist" },
+      { title: "BA Social Work", cutoff: 24, needs: [], dept: "Social Sciences", careers: "Social Worker, NGO" },
+      { title: "BSc Midwifery", cutoff: 18, needs: ["Biology"], dept: "Health Sciences", careers: "Midwife" },
+    ],
+  },
+  {
+    id: 5, name: "Univ. of Professional Studies", abbr: "UPSA", city: "Accra",
+    founded: 1965, size: "~15,000", email: "info@upsa.edu.gh",
+    phone: "+233 302 500179", site: "https://www.upsa.edu.gh",
+    apply: "https://admissions.upsa.edu.gh", window: "Mar — Jun",
+    motto: "Excellence in Professional Education", deadlineDate: "2026-06-30",
+    courses: [
+      { title: "BSc Accounting", cutoff: 18, needs: ["Financial Accounting", "Economics"], dept: "Accounting", careers: "Accountant, Auditor" },
+      { title: "BA Marketing", cutoff: 22, needs: [], dept: "Marketing", careers: "Marketing Manager, Brand Strategist" },
+      { title: "BSc Banking & Finance", cutoff: 18, needs: ["Economics"], dept: "Finance", careers: "Banker, Financial Analyst" },
+      { title: "BSc Info Technology", cutoff: 20, needs: ["Elective Mathematics"], dept: "IT", careers: "IT Manager, Developer" },
+    ],
+  },
+  {
+    id: 6, name: "GIMPA", abbr: "GIMPA", city: "Accra",
+    founded: 1961, size: "~10,000", email: "info@gimpa.edu.gh",
+    phone: "+233 302 401681", site: "https://www.gimpa.edu.gh",
+    apply: "https://gimpa.edu.gh/admissions", window: "Jan — Apr",
+    motto: "Developing Leaders", deadlineDate: "2026-04-30",
+    courses: [
+      { title: "BBA Business Admin", cutoff: 16, needs: [], dept: "Business", careers: "CEO, Business Consultant" },
+      { title: "Bachelor of Laws", cutoff: 12, needs: [], dept: "Law", careers: "Lawyer, Judge" },
+      { title: "BA Public Admin", cutoff: 18, needs: [], dept: "Governance", careers: "Civil Servant, Policy Maker" },
+      { title: "BSc Nursing", cutoff: 16, needs: ["Biology", "Chemistry"], dept: "Nursing", careers: "Nurse" },
+    ],
+  },
+];
+
+const SCHOLARSHIPS = [
+  { name: "GETFund Scholarship", provider: "Government of Ghana", type: "Need-based", eligibility: "Ghanaian citizens in tertiary institutions", deadline: "Varies by year", link: "https://getfund.gov.gh", aggReq: null },
+  { name: "MasterCard Foundation Scholars", provider: "MasterCard Foundation", type: "Full scholarship", eligibility: "High-performing students with financial need at UG, KNUST, or Ashesi", deadline: "Dec — Feb", link: "https://mastercardfdn.org", aggReq: 12 },
+  { name: "MTN Foundation Scholarship", provider: "MTN Ghana", type: "Merit-based", eligibility: "Top students in STEM fields", deadline: "Sep — Nov", link: "https://mtn.com.gh", aggReq: 14 },
+  { name: "Vodafone Ghana Scholarship", provider: "Vodafone Ghana Foundation", type: "Merit + Need", eligibility: "Students from underserved communities", deadline: "Varies", link: "https://vodafone.com.gh", aggReq: null },
+  { name: "District Assembly Bursary", provider: "Local Government", type: "Need-based", eligibility: "Students from specific districts — apply at your DA office", deadline: "Ongoing", link: "", aggReq: null },
+  { name: "Stanbic Bank Scholarship", provider: "Stanbic Bank Ghana", type: "Merit-based", eligibility: "Top WASSCE performers pursuing business/finance", deadline: "Jan — Mar", link: "https://stanbicbank.com.gh", aggReq: 10 },
+];
+
+const COUNSELORS = [
+  { name: "Dr. Ama Serwaa Bonsu", area: "STEM Careers & Admissions", tel: "233240000001", mail: "a.bonsu@admitgh.com", city: "Accra", about: "10+ years guiding students into top STEM programs across Ghana. Specializes in Medicine, Engineering, and Pharmacy admissions.", photo: "AS" },
+  { name: "Mr. Kwesi Mensah", area: "Business & Finance Programs", tel: "233200000002", mail: "k.mensah@admitgh.com", city: "Kumasi", about: "Former KNUST Business School lecturer. Expert in BBA, BCom, and Accounting admissions. Has placed 200+ students.", photo: "KM" },
+  { name: "Mrs. Efua Adjei-Frimpong", area: "Arts, Humanities & Law", tel: "233260000003", mail: "e.adjei@admitgh.com", city: "Cape Coast", about: "Helped 500+ General Arts students find their path to top universities. Strong network with UCC and UG Arts faculties.", photo: "EA" },
+  { name: "Mr. Ibrahim Yakubu", area: "Scholarships & Financial Aid", tel: "233270000004", mail: "i.yakubu@admitgh.com", city: "Tamale", about: "Specialist in GETFund, MasterCard Foundation, and district assembly scholarships. Has secured funding for 300+ students.", photo: "IY" },
+  { name: "Dr. Nana Akua Owusu", area: "Health Sciences & Medicine", tel: "233550000005", mail: "n.owusu@admitgh.com", city: "Accra", about: "Medical doctor turned career counselor. Guides pre-med, nursing, and pharmacy applicants through the entire process.", photo: "NO" },
+];
+
+// ══════════ HELPERS (extract to lib/helpers.ts) ══════════
+
+function calcAggregate(grades, electives) {
+  const coreVals = CORE_SUBJECTS.map(s => grades[s]).filter(Boolean).map(g => GRADE_VALUES[g]).sort((a, b) => a - b).slice(0, 3);
+  const elecVals = electives.map(s => grades[s]).filter(Boolean).map(g => GRADE_VALUES[g]).sort((a, b) => a - b).slice(0, 3);
+  return coreVals.length >= 3 && elecVals.length >= 3
+    ? coreVals.reduce((a, b) => a + b, 0) + elecVals.reduce((a, b) => a + b, 0)
+    : null;
+}
+
+function aggColor(a) {
+  if (a <= 10) return "#34d399";
+  if (a <= 14) return "#4ade80";
+  if (a <= 18) return "#fbbf24";
+  if (a <= 24) return "#f97316";
+  return "#ef4444";
+}
+
+function aggLabel(a) {
+  if (a <= 10) return "Excellent";
+  if (a <= 14) return "Very Good";
+  if (a <= 18) return "Good";
+  if (a <= 24) return "Fair";
+  return "Limited";
+}
+
+function countMatches(agg, electives) {
+  if (!agg) return 0;
+  return UNIVERSITIES.reduce((c, u) =>
+    c + u.courses.filter(p => p.cutoff >= agg && p.needs.every(n => electives.includes(n))).length, 0);
+}
+
+function daysUntil(dateStr) {
+  return Math.max(0, Math.ceil((new Date(dateStr) - new Date()) / (1000 * 60 * 60 * 24)));
+}
+
+// ══════════ FEATURE LIST ══════════
+// All features below are implemented in the prototype.
+// Claude Code should rebuild each as a proper Next.js component.
+//
+// DASHBOARD (merged profile + dashboard):
+//   - Stats row: aggregate, matches, applied count
+//   - Program selector with 7 SHS programs
+//   - Elective picker (choose 4 from pool)
+//   - Grade entry (collapsible, 8 subjects)
+//   - What-If simulator (temporary grade changes, shows new aggregate + match diff)
+//   - Applications list with status badges
+//   - Quick action cards (Universities, Scholarships, Counselors)
+//
+// UNIVERSITIES LIST:
+//   - Card per university with monogram, abbr, city, match count, deadline badge
+//   - Application status shown if applied
+//
+// UNIVERSITY DETAIL:
+//   - Header with monogram, name, motto, city, est. year, deadline countdown
+//   - Stats row: students, programs, admissions window, eligible count
+//   - Contact card: email (mailto:), phone (tel:), website, deadline
+//   - AI Insight: personalized analysis of student's fit
+//   - "Ask AI more" button opens chatbot
+//   - Apply Now link + status buttons (Applied/Pending/Accepted/Rejected)
+//   - Compare button (side-by-side with another university)
+//   - Program list with eligibility, required electives, career paths
+//
+// SCHOLARSHIPS:
+//   - List with eligibility based on aggregate
+//   - Green/orange badges
+//   - Provider, type, deadline, link
+//
+// COUNSELORS:
+//   - Expandable cards with photo initials
+//   - WhatsApp (wa.me/), Email (mailto:), Call (tel:) links
+//
+// AI CHATBOT:
+//   - Floating bubble bottom-right
+//   - Chat window with messages
+//   - Quick question buttons
+//   - Context-aware (knows student's profile)
+//   - "Ask AI more" pre-fills from university pages
+//
+// WHAT-IF SIMULATOR:
+//   - Change any grade temporarily
+//   - Shows current aggregate vs what-if aggregate
+//   - Shows match count difference
+//   - "X new programs!" highlight
+//
+// UNIVERSITY COMPARISON:
+//   - Side-by-side two universities
+//   - Compare: city, founded, size, programs, matches, deadline
+
+// ══════════ END OF REFERENCE ══════════
+// Claude Code: use the data, types, helpers, and feature descriptions above
+// to build the real Next.js app following ADMITGH_BUILD.md phases.
