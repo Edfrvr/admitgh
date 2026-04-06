@@ -1,6 +1,12 @@
+import Groq from "groq-sdk";
 import { calcAggregate, aggregateLabel } from "@/lib/helpers";
 import type { GradeMap } from "@/lib/types";
 import type { NextRequest } from "next/server";
+
+// ─── Models ───────────────────────────────────────────────────────────────────
+
+const PRIMARY_MODEL = "llama-3.3-70b-versatile";
+const FALLBACK_MODEL = "llama-3.1-8b-instant";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -19,19 +25,6 @@ interface ChatRequestBody {
   };
 }
 
-interface AnthropicTextDelta {
-  type: "text_delta";
-  text: string;
-}
-
-interface AnthropicContentBlockDeltaEvent {
-  type: "content_block_delta";
-  index: number;
-  delta: AnthropicTextDelta | { type: string };
-}
-
-type AnthropicEvent = AnthropicContentBlockDeltaEvent | { type: string };
-
 // ─── System prompt builder ─────────────────────────────────────────────────────
 
 function buildSystemPrompt(profile: ChatRequestBody["profile"]): string {
@@ -48,35 +41,62 @@ function buildSystemPrompt(profile: ChatRequestBody["profile"]): string {
           .join("\n")
       : "  (none entered yet)";
 
-  return `You are AdmitGH AI Advisor — a friendly, knowledgeable Ghanaian university admissions counselor.
+  return `You are AdmitGH AI Advisor, a friendly Ghanaian university admissions counselor helping SHS graduates. Student profile: Name: ${profile.name || "Student"}, Program: ${profile.program ?? "Not selected"}, Electives: ${profile.electives.length > 0 ? profile.electives.join(", ") : "None selected"}, Grades:\n${gradesLines}\nAggregate: ${aggLine}. Be concise (2-4 sentences). Be encouraging but honest. Never invent data. Suggest remarking if aggregate is 18+.`;
+}
 
-Student profile:
-- Name: ${profile.name || "Student"}
-- SHS Program: ${profile.program ?? "Not selected"}
-- Electives: ${profile.electives.length > 0 ? profile.electives.join(", ") : "None selected"}
-- WASSCE Grades:
-${gradesLines}
-- Aggregate: ${aggLine}
+// ─── Stream builder ───────────────────────────────────────────────────────────
 
-You know about Ghanaian universities, programs, WASSCE cut-offs, scholarships, and career paths.
+async function createStreamResponse(
+  groq: Groq,
+  model: string,
+  systemPrompt: string,
+  messages: ChatMessage[]
+): Promise<Response> {
+  const stream = await groq.chat.completions.create({
+    model,
+    messages: [
+      { role: "system", content: systemPrompt },
+      ...messages.map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      })),
+    ],
+    max_tokens: 500,
+    stream: true,
+  });
 
-Rules:
-1. Be encouraging but honest about chances — never give false hope
-2. Reference specific programs and universities when relevant
-3. Suggest remarking (re-sitting exams) if aggregate is 18 or higher
-4. Recommend relevant scholarships when appropriate
-5. Keep responses concise — 2 to 4 sentences unless the student asks for detail
-6. Use simple, clear language appropriate for 17–18 year old users
-7. Never invent university data or fabricate cut-off scores
-8. If grades are not entered, encourage the student to add them for personalised advice`;
+  const encoder = new TextEncoder();
+
+  const readable = new ReadableStream({
+    async start(controller) {
+      try {
+        for await (const chunk of stream) {
+          const text = chunk.choices[0]?.delta?.content ?? "";
+          if (text) {
+            controller.enqueue(encoder.encode(text));
+          }
+        }
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(readable, {
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-cache, no-store",
+      "X-Accel-Buffering": "no",
+    },
+  });
 }
 
 // ─── Route handler ─────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest): Promise<Response> {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!process.env.GROQ_API_KEY) {
     return Response.json(
-      { error: "AI advisor is not configured. Add ANTHROPIC_API_KEY to .env.local." },
+      { error: "AI advisor is not configured. Add GROQ_API_KEY to .env.local." },
       { status: 503 }
     );
   }
@@ -94,7 +114,6 @@ export async function POST(request: NextRequest): Promise<Response> {
     return Response.json({ error: "messages array is required." }, { status: 400 });
   }
 
-  // Validate each message has the expected shape
   for (const msg of messages) {
     if (
       typeof msg.content !== "string" ||
@@ -104,82 +123,31 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
   }
 
-  const anthropicResponse = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "x-api-key": process.env.ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1024,
-      system: buildSystemPrompt(profile),
-      messages,
-      stream: true,
-    }),
-  });
+  const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+  const systemPrompt = buildSystemPrompt(profile);
 
-  if (!anthropicResponse.ok) {
-    const errorText = await anthropicResponse.text();
-    console.error("Anthropic API error:", anthropicResponse.status, errorText);
-    return Response.json({ error: "AI service error. Please try again." }, { status: 502 });
-  }
+  try {
+    return await createStreamResponse(groq, PRIMARY_MODEL, systemPrompt, messages);
+  } catch (primaryErr) {
+    const isRateLimit =
+      primaryErr instanceof Groq.APIError && primaryErr.status === 429;
 
-  // Transform the Anthropic SSE stream into a plain text stream.
-  // Each chunk sent to the client is the raw text delta — no SSE overhead.
-  const encoder = new TextEncoder();
-  const decoder = new TextDecoder();
-
-  const stream = new ReadableStream({
-    async start(controller) {
-      const reader = anthropicResponse.body!.getReader();
-      let buffer = "";
-
+    if (isRateLimit) {
       try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-
-          // Split on newlines but keep the last (possibly incomplete) line in the buffer
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            const data = line.slice(6).trim();
-            if (!data || data === "[DONE]") continue;
-
-            try {
-              const event = JSON.parse(data) as AnthropicEvent;
-              if (
-                event.type === "content_block_delta" &&
-                "delta" in event &&
-                event.delta.type === "text_delta"
-              ) {
-                controller.enqueue(
-                  encoder.encode((event.delta as AnthropicTextDelta).text)
-                );
-              }
-            } catch {
-              // Skip malformed JSON — Anthropic occasionally sends non-data lines
-            }
-          }
-        }
-      } finally {
-        reader.releaseLock();
-        controller.close();
+        return await createStreamResponse(groq, FALLBACK_MODEL, systemPrompt, messages);
+      } catch (fallbackErr) {
+        console.error("Groq fallback model error:", fallbackErr);
+        return Response.json(
+          { error: "AI service is currently rate limited. Please try again in a moment." },
+          { status: 429 }
+        );
       }
-    },
-  });
+    }
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-cache, no-store",
-      "X-Accel-Buffering": "no", // Disable nginx buffering so chunks arrive immediately
-    },
-  });
+    console.error("Groq API error:", primaryErr);
+    return Response.json(
+      { error: "AI service error. Please try again." },
+      { status: 502 }
+    );
+  }
 }
