@@ -114,118 +114,163 @@ select option {
   animation: slideIn 0.2s ease;
 }
 
-/* ─── Chat bubble animations ──────────────────────────────────────────────── */
+/* ─── Chat bubble & panel ─────────────────────────────────────────────────── */
 
-@keyframes chat-window-in {
-  from {
-    opacity: 0;
-    transform: scale(0.88) translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-}
-
-@keyframes chat-window-out {
-  from {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-  to {
-    opacity: 0;
-    transform: scale(0.88) translateY(10px);
-  }
-}
-
-@keyframes chat-msg-in {
-  from {
-    opacity: 0;
-    transform: translateY(7px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes bounce-dot {
-  0%,
-  80%,
-  100% {
-    transform: translateY(0);
-    opacity: 0.35;
-  }
-  40% {
-    transform: translateY(-5px);
-    opacity: 1;
-  }
-}
-
-.chat-window-enter {
-  animation: chat-window-in 0.24s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-  transform-origin: bottom right;
-}
-
-.chat-window-exit {
-  animation: chat-window-out 0.18s ease-in forwards;
-  transform-origin: bottom right;
-}
-
-.chat-msg-fade {
-  animation: chat-msg-in 0.22s ease forwards;
-}
-
-/* ─── Premium floating bubble ─────────────────────────────────────────────── */
-
-@keyframes bubble-float {
+/* Idle pulse glow on the floating button */
+@keyframes bubble-glow {
   0%,
   100% {
-    transform: translateY(0px);
+    box-shadow:
+      inset 0 1.5px 0 rgba(255, 255, 255, 0.35),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.15),
+      0 4px 20px rgba(0, 0, 0, 0.35),
+      0 4px 24px rgba(245, 158, 11, 0.3),
+      0 0 0 0 rgba(245, 158, 11, 0.38);
   }
   50% {
-    transform: translateY(-6px);
+    box-shadow:
+      inset 0 1.5px 0 rgba(255, 255, 255, 0.35),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.15),
+      0 6px 28px rgba(0, 0, 0, 0.4),
+      0 8px 36px rgba(245, 158, 11, 0.52),
+      0 0 0 10px rgba(245, 158, 11, 0);
   }
 }
 
-@keyframes bubble-ring-pulse {
-  0% {
+/* Online dot breathing glow */
+@keyframes dot-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(74, 222, 128, 0);
+  }
+}
+
+/* Panel — desktop: origin bottom-right */
+@keyframes panel-in-desktop {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
     transform: scale(1);
-    opacity: 0.45;
   }
-  100% {
-    transform: scale(2.4);
+}
+
+@keyframes panel-out-desktop {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
     opacity: 0;
+    transform: scale(0.9);
   }
 }
 
-@keyframes online-dot-glow {
+/*
+  Panel — mobile: centering translate MUST be in every keyframe.
+  Element is positioned top:50% left:50%; the translate(-50%,-50%)
+  centres it. animation-fill-mode:both ensures the from-state applies
+  immediately so the element is centred before the first paint.
+*/
+@keyframes panel-in-mobile {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes panel-out-mobile {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.9);
+  }
+}
+
+/* Message fade-in */
+@keyframes msg-appear {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Typing dots bounce */
+@keyframes dot-bounce {
   0%,
+  60%,
   100% {
-    box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.7), 0 0 5px rgba(74, 222, 128, 0.4);
+    transform: translateY(0);
   }
-  50% {
-    box-shadow: 0 0 0 3px rgba(74, 222, 128, 0), 0 0 10px rgba(74, 222, 128, 0.7);
+  30% {
+    transform: translateY(-5px);
   }
 }
 
-.bubble-float {
-  animation: bubble-float 3.6s ease-in-out infinite;
+/* ── Classes ──────────────────────────────────────────────────────────────── */
+
+.bubble-idle {
+  animation: bubble-glow 2.5s ease-in-out infinite;
+  transition: transform 0.15s ease;
 }
 
-.bubble-ring {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  background: rgba(251, 191, 36, 0.22);
-  animation: bubble-ring-pulse 2.8s ease-out infinite;
-  pointer-events: none;
+.bubble-idle:hover {
+  transform: scale(1.08) !important;
 }
 
-.bubble-ring-2 {
-  animation-delay: 1.4s;
+.bubble-idle:active {
+  transform: scale(0.95) !important;
 }
 
-.bubble-online-dot {
-  animation: online-dot-glow 2.2s ease-in-out infinite;
+.dot-online {
+  animation: dot-breathe 2s ease-in-out infinite;
+}
+
+/* fill-mode: both → applies from-state before animation starts (no position flash) */
+.panel-in-desktop {
+  transform-origin: bottom right;
+  animation: panel-in-desktop 0.2s ease-out both;
+}
+
+.panel-out-desktop {
+  transform-origin: bottom right;
+  animation: panel-out-desktop 0.18s ease-in both;
+}
+
+.panel-in-mobile {
+  animation: panel-in-mobile 0.2s ease-out both;
+}
+
+.panel-out-mobile {
+  animation: panel-out-mobile 0.18s ease-in both;
+}
+
+.msg-in {
+  animation: msg-appear 0.22s ease both;
+}
+
+/* Hide scrollbar on the quick-questions horizontal row */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }

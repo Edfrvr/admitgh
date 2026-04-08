@@ -5,21 +5,11 @@ import {
   useEffect,
   useRef,
   useCallback,
-  useMemo,
   type KeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
 } from "react";
-import { X, Send, Sparkles, Loader2 } from "lucide-react";
+import { X, Send, Loader2 } from "lucide-react";
 import { useProfileContext } from "@/lib/ProfileContext";
 import { useChatContext } from "@/lib/ChatContext";
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const BUBBLE_SIZE = 60;
-const WINDOW_W = 370;
-const WINDOW_H = 520;
-const EDGE = 20;
-const DRAG_THRESHOLD = 6;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -29,26 +19,14 @@ interface Message {
   content: string;
 }
 
-interface Position {
-  x: number;
-  y: number;
-}
-
-interface DragState {
-  active: boolean;
-  startX: number;
-  startY: number;
-  originX: number;
-  originY: number;
-  moved: boolean;
-}
-
-// ─── Quick questions ──────────────────────────────────────────────────────────
+// ─── Quick suggestions ────────────────────────────────────────────────────────
 
 const QUICK_QUESTIONS = [
-  "What are my best program options?",
-  "Am I eligible for any scholarships?",
-  "Which university should I apply to first?",
+  "Best programs for me?",
+  "Am I eligible for scholarships?",
+  "Which university first?",
+  "What does my aggregate mean?",
+  "Career options for my electives?",
 ];
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -62,131 +40,104 @@ export default function ChatBubble() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [isClosing, setIsClosing] = useState(false);
-  const [bubblePos, setBubblePos] = useState<Position>({ x: -1, y: -1 });
   const [isMobile, setIsMobile] = useState(false);
-  const [isHovered, setIsHovered] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
+  const [bubblePos, setBubblePos] = useState({ bottom: 20, right: 20 });
 
   const messageIdRef = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const drag = useRef<DragState>({
+  const bubblePosRef = useRef({ bottom: 20, right: 20 });
+  const dragInfo = useRef({
     active: false,
     startX: 0,
     startY: 0,
-    originX: 0,
-    originY: 0,
+    startRight: 20,
+    startBottom: 20,
     moved: false,
   });
 
-  // ── Init position ──────────────────────────────────────────────────────────
+  // ── Detect viewport size ──────────────────────────────────────────────────
   useEffect(() => {
-    function update() {
-      setIsMobile(window.innerWidth <= 640);
-      setBubblePos({
-        x: window.innerWidth - BUBBLE_SIZE - EDGE,
-        y: window.innerHeight - BUBBLE_SIZE - EDGE,
-      });
+    function sync() {
+      setIsMobile(window.innerWidth < 640);
     }
-    update();
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
+    sync();
+    window.addEventListener("resize", sync);
+    return () => window.removeEventListener("resize", sync);
   }, []);
 
-  // ── Auto-scroll ────────────────────────────────────────────────────────────
+  // ── Global drag listeners for the floating bubble ────────────────────────
+  useEffect(() => {
+    function onMove(clientX: number, clientY: number) {
+      if (!dragInfo.current.active) return;
+      const dx = clientX - dragInfo.current.startX;
+      const dy = clientY - dragInfo.current.startY;
+      if (Math.abs(dx) > 5 || Math.abs(dy) > 5) dragInfo.current.moved = true;
+      if (!dragInfo.current.moved) return;
+      const right = Math.max(8, Math.min(window.innerWidth - 64, dragInfo.current.startRight - dx));
+      const bottom = Math.max(8, Math.min(window.innerHeight - 64, dragInfo.current.startBottom - dy));
+      bubblePosRef.current = { right, bottom };
+      setBubblePos({ right, bottom });
+    }
+    function onEnd() {
+      dragInfo.current.active = false;
+    }
+    function onMouseMove(e: MouseEvent) {
+      onMove(e.clientX, e.clientY);
+    }
+    function onTouchMove(e: TouchEvent) {
+      const t = e.touches[0];
+      if (!t) return;
+      if (dragInfo.current.active && dragInfo.current.moved) e.preventDefault();
+      onMove(t.clientX, t.clientY);
+    }
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onEnd);
+    window.addEventListener("touchmove", onTouchMove, { passive: false });
+    window.addEventListener("touchend", onEnd);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onEnd);
+      window.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("touchend", onEnd);
+    };
+  }, []); // setBubblePos and refs are stable — safe with []
+
+  // ── Auto-scroll to latest message ────────────────────────────────────────
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // ── Focus input on open ────────────────────────────────────────────────────
+  // ── Focus input when chat opens ───────────────────────────────────────────
   useEffect(() => {
-    if (isOpen) setTimeout(() => inputRef.current?.focus(), 200);
+    if (isOpen) setTimeout(() => inputRef.current?.focus(), 220);
   }, [isOpen]);
 
-  // ── Pending message (from "Ask AI" buttons) ────────────────────────────────
+  // ── Consume pending message (triggered by "Ask AI" buttons elsewhere) ─────
   useEffect(() => {
     if (isOpen && pendingMessage) {
       clearPending();
       void sendMessage(pendingMessage);
     }
+    // sendMessage is stable via useCallback — safe to omit
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, pendingMessage, clearPending]);
 
-  // ── Chat window position (computed from bubble pos) ────────────────────────
-  const chatPos = useMemo<Position>(() => {
-    if (bubblePos.x === -1) return { x: 0, y: 0 };
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-
-    const x = Math.max(
-      EDGE,
-      Math.min(vw - WINDOW_W - EDGE, bubblePos.x + BUBBLE_SIZE - WINDOW_W)
-    );
-
-    const spaceAbove = bubblePos.y - EDGE;
-    const spaceBelow = vh - bubblePos.y - BUBBLE_SIZE - EDGE;
-    const y =
-      spaceAbove >= WINDOW_H || spaceAbove >= spaceBelow
-        ? Math.max(EDGE, bubblePos.y - WINDOW_H - 12)
-        : bubblePos.y + BUBBLE_SIZE + 12;
-
-    return { x, y };
-  }, [bubblePos]);
-
-  // ── Drag handlers ──────────────────────────────────────────────────────────
-  function onPointerDown(e: ReactPointerEvent<HTMLButtonElement>) {
-    drag.current = {
-      active: true,
-      startX: e.clientX,
-      startY: e.clientY,
-      originX: bubblePos.x,
-      originY: bubblePos.y,
-      moved: false,
-    };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    setIsDragging(true);
-    setIsHovered(false);
+  // ── Open / close ──────────────────────────────────────────────────────────
+  function handleOpen() {
+    setIsOpen(true);
   }
 
-  function onPointerMove(e: ReactPointerEvent<HTMLButtonElement>) {
-    if (!drag.current.active) return;
-    const dx = e.clientX - drag.current.startX;
-    const dy = e.clientY - drag.current.startY;
-
-    if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) {
-      drag.current.moved = true;
-    }
-
-    setBubblePos({
-      x: Math.max(EDGE, Math.min(window.innerWidth - BUBBLE_SIZE - EDGE, drag.current.originX + dx)),
-      y: Math.max(EDGE, Math.min(window.innerHeight - BUBBLE_SIZE - EDGE, drag.current.originY + dy)),
-    });
-  }
-
-  function onPointerUp(e: ReactPointerEvent<HTMLButtonElement>) {
-    const wasDragged = drag.current.moved;
-    drag.current.active = false;
-    drag.current.moved = false;
-    setIsDragging(false);
-
-    if (!wasDragged) {
-      if (isOpen) {
-        triggerClose();
-      } else {
-        setIsOpen(true);
-      }
-    }
-  }
-
-  function triggerClose() {
+  function handleClose() {
     setIsClosing(true);
+    // Wait for exit animation to finish before unmounting
     setTimeout(() => {
       setIsClosing(false);
       setIsOpen(false);
     }, 180);
   }
 
-  // ── Send message ───────────────────────────────────────────────────────────
+  // ── Send message ──────────────────────────────────────────────────────────
   const sendMessage = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
@@ -259,243 +210,201 @@ export default function ChatBubble() {
     }
   }
 
-  // ── Guard: not initialized yet ─────────────────────────────────────────────
-  if (bubblePos.x === -1) return null;
-
   const isEmpty = messages.length === 0;
 
-  // ── Chat window styles (mobile vs desktop) ─────────────────────────────────
-  const windowStyle: React.CSSProperties = isMobile
+  // ── CSS animation class — separate desktop / mobile paths ─────────────────
+  //   Mobile: every keyframe carries translate(-50%,-50%) so centering is
+  //   preserved through the animation. fill-mode:both prevents position flash.
+  //   Desktop: origin is bottom-right (set in CSS), no translate needed.
+  const panelClass = isMobile
+    ? isClosing
+      ? "panel-out-mobile"
+      : "panel-in-mobile"
+    : isClosing
+    ? "panel-out-desktop"
+    : "panel-in-desktop";
+
+  // ── Panel dimensions & position ───────────────────────────────────────────
+  //   Desktop: fixed 380×520 anchored bottom-right, 20px from edges.
+  //   Mobile : centered via top/left 50% + translate in CSS animation.
+  //            Width: viewport minus 40px (20px each side), capped at 400px.
+  //            Height: 75dvh capped at 540px — never 100vh.
+  const panelStyle: React.CSSProperties = isMobile
     ? {
         position: "fixed",
-        inset: 0,
-        width: "100dvw",
-        height: "100dvh",
-        borderRadius: 0,
-        top: 0,
-        left: 0,
+        top: "50%",
+        left: "50%",
+        // transform is handled entirely by the CSS animation class
+        width: "calc(100vw - 40px)",
+        maxWidth: 400,
+        height: "75dvh",
+        maxHeight: 540,
+        borderRadius: 20,
+        zIndex: 9998,
       }
     : {
         position: "fixed",
-        left: chatPos.x,
-        top: chatPos.y,
-        width: WINDOW_W,
-        height: WINDOW_H,
-        maxWidth: "calc(100vw - 32px)",
-        maxHeight: "calc(100vh - 40px)",
+        bottom: 20,
+        right: 20,
+        width: 380,
+        height: 520,
         borderRadius: 20,
+        zIndex: 9998,
       };
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <>
-      {/* ── Floating bubble ── */}
-      {/* Outer container: only handles fixed position */}
-      <div
-        style={{
-          position: "fixed",
-          left: bubblePos.x,
-          top: bubblePos.y,
-          width: BUBBLE_SIZE,
-          height: BUBBLE_SIZE,
-          zIndex: 10000,
-        }}
-      >
-        {/* Idle pulse rings — anchored, not floating */}
-        {!isOpen && !isDragging && (
-          <>
-            <div className="bubble-ring" />
-            <div className="bubble-ring bubble-ring-2" />
-          </>
-        )}
-
-        {/* Inner floater: carries button + dot together through the bob */}
-        <div
-          className={!isOpen && !isDragging ? "bubble-float" : undefined}
-          style={{ position: "relative", width: "100%", height: "100%" }}
+      {/* ── Floating bubble — disappears when chat is open ── */}
+      {!isOpen && (
+        <button
+          aria-label="Open AI advisor"
+          className="bubble-idle"
+          onMouseDown={(e) => {
+            dragInfo.current = {
+              active: true,
+              startX: e.clientX,
+              startY: e.clientY,
+              startRight: bubblePosRef.current.right,
+              startBottom: bubblePosRef.current.bottom,
+              moved: false,
+            };
+          }}
+          onTouchStart={(e) => {
+            const t = e.touches[0];
+            if (!t) return;
+            dragInfo.current = {
+              active: true,
+              startX: t.clientX,
+              startY: t.clientY,
+              startRight: bubblePosRef.current.right,
+              startBottom: bubblePosRef.current.bottom,
+              moved: false,
+            };
+          }}
+          onClick={() => {
+            if (dragInfo.current.moved) return;
+            handleOpen();
+          }}
+          style={{
+            position: "fixed",
+            bottom: bubblePos.bottom,
+            right: bubblePos.right,
+            width: 58,
+            height: 58,
+            borderRadius: "50%",
+            background:
+              "linear-gradient(145deg, #fde68a 0%, #f59e0b 45%, #b45309 100%)",
+            border: "1.5px solid rgba(255,255,255,0.22)",
+            cursor: "grab",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9999,
+            flexShrink: 0,
+            userSelect: "none",
+            touchAction: "none",
+          }}
         >
-          {/* Main button */}
-          <button
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            onMouseEnter={() => !isDragging && setIsHovered(true)}
-            onMouseLeave={() => setIsHovered(false)}
-            aria-label={isOpen ? "Close AI advisor" : "Open AI advisor"}
-            style={{
-              position: "relative",
-              width: "100%",
-              height: "100%",
-              borderRadius: "50%",
-              /* Rich 3-stop gradient for depth */
-              background:
-                "linear-gradient(145deg, #fde68a 0%, #f59e0b 40%, #b45309 100%)",
-              border: "none",
-              cursor: isDragging ? "grabbing" : "grab",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              overflow: "hidden",
-              touchAction: "none",
-              userSelect: "none",
-              /* Layered shadow: inner highlight + inner depth + outer lift + gold aura + ring on hover */
-              boxShadow: isHovered && !isOpen
-                ? [
-                    "inset 0 1px 0 rgba(255,255,255,0.4)",
-                    "inset 0 -2px 6px rgba(0,0,0,0.25)",
-                    "0 2px 8px rgba(0,0,0,0.4)",
-                    "0 8px 24px rgba(0,0,0,0.3)",
-                    "0 0 0 1px rgba(251,191,36,0.55)",
-                    "0 0 0 8px rgba(251,191,36,0.12)",
-                    "0 0 0 15px rgba(251,191,36,0.05)",
-                    "0 0 36px rgba(251,191,36,0.4)",
-                  ].join(", ")
-                : [
-                    "inset 0 1px 0 rgba(255,255,255,0.4)",
-                    "inset 0 -2px 6px rgba(0,0,0,0.25)",
-                    "0 2px 8px rgba(0,0,0,0.4)",
-                    "0 8px 28px rgba(0,0,0,0.28)",
-                    "0 0 0 1px rgba(251,191,36,0.45)",
-                    "0 0 24px rgba(251,191,36,0.28)",
-                  ].join(", "),
-              transition:
-                "box-shadow 0.3s ease, transform 0.2s ease",
-              transform: isHovered && !isOpen && !isDragging
-                ? "scale(1.06)"
-                : "scale(1)",
-            }}
-          >
-            {/* Sphere highlight — top-left white sheen */}
-            <div
-              style={{
-                position: "absolute",
-                top: 5,
-                left: 10,
-                width: "38%",
-                height: "32%",
-                borderRadius: "50%",
-                background:
-                  "radial-gradient(ellipse at center, rgba(255,255,255,0.38) 0%, transparent 70%)",
-                pointerEvents: "none",
-              }}
-            />
+          <AdmitIcon size={24} />
 
-            {/* Icon layer: custom icon ↔ X cross-fade with rotation */}
-            <div
-              style={{ position: "relative", width: 22, height: 22 }}
-            >
-              {/* Custom AI icon (visible when closed) */}
-              <div
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  opacity: isOpen ? 0 : 1,
-                  transform: isOpen
-                    ? "rotate(-90deg) scale(0.5)"
-                    : "rotate(0deg) scale(1)",
-                  transition:
-                    "opacity 0.28s ease, transform 0.32s cubic-bezier(0.34,1.56,0.64,1)",
-                }}
-              >
-                <AIChatIcon />
-              </div>
-
-              {/* X icon (visible when open) */}
-              <div
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  opacity: isOpen ? 1 : 0,
-                  transform: isOpen
-                    ? "rotate(0deg) scale(1)"
-                    : "rotate(90deg) scale(0.5)",
-                  transition:
-                    "opacity 0.28s ease, transform 0.32s cubic-bezier(0.34,1.56,0.64,1)",
-                }}
-              >
-                <X size={20} color="rgba(15,13,11,0.88)" strokeWidth={2.5} />
-              </div>
-            </div>
-          </button>
-
-          {/* Online status dot */}
-          <div
-            className="bubble-online-dot"
+          {/* Online indicator */}
+          <span
+            className="dot-online"
             style={{
               position: "absolute",
-              top: 2,
-              right: 2,
-              width: 13,
-              height: 13,
+              top: 3,
+              right: 3,
+              width: 12,
+              height: 12,
               borderRadius: "50%",
-              background: "linear-gradient(135deg, #4ade80 0%, #16a34a 100%)",
+              background: "linear-gradient(135deg, #4ade80, #16a34a)",
               border: "2.5px solid #0f0d0b",
-              pointerEvents: "none",
-              zIndex: 2,
+              display: "block",
             }}
           />
-        </div>
-      </div>
+        </button>
+      )}
 
-      {/* ── Chat window ── */}
+      {/* ── Mobile backdrop — tap anywhere outside to close ── */}
+      {isOpen && isMobile && !isClosing && (
+        <div
+          onClick={handleClose}
+          role="button"
+          aria-label="Close chat"
+          tabIndex={-1}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0, 0, 0, 0.55)",
+            backdropFilter: "blur(3px)",
+            WebkitBackdropFilter: "blur(3px)",
+            zIndex: 9997,
+          }}
+        />
+      )}
+
+      {/* ── Chat panel ── */}
       {isOpen && (
         <div
-          className={isClosing ? "chat-window-exit" : "chat-window-enter"}
+          className={panelClass}
           style={{
-            ...windowStyle,
-            background: "rgba(18, 15, 11, 0.82)",
+            ...panelStyle,
+            background: "rgba(14, 11, 8, 0.95)",
             backdropFilter: "blur(28px) saturate(180%)",
             WebkitBackdropFilter: "blur(28px) saturate(180%)",
-            border: "1px solid rgba(251,191,36,0.1)",
-            boxShadow:
-              "0 32px 80px rgba(0,0,0,0.65), 0 0 0 1px rgba(255,255,255,0.04), inset 0 1px 0 rgba(255,255,255,0.05)",
+            border: "1px solid rgba(251, 191, 36, 0.11)",
+            boxShadow: [
+              "0 0 0 1px rgba(255,255,255,0.04)",
+              "0 8px 32px rgba(0,0,0,0.5)",
+              "0 24px 64px rgba(0,0,0,0.4)",
+            ].join(", "),
             display: "flex",
             flexDirection: "column",
             overflow: "hidden",
-            zIndex: 9999,
           }}
         >
-          {/* Header */}
-          <div
+          {/* ── Header ────────────────────────────────────────────────────── */}
+          <header
             style={{
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
-              padding: "14px 16px",
-              borderBottom: "1px solid rgba(255,255,255,0.055)",
+              padding: "0 14px",
+              height: 48,
+              minHeight: 48,
+              borderBottom: "1px solid rgba(255,255,255,0.06)",
               flexShrink: 0,
               background: "rgba(251,191,36,0.025)",
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+              {/* Avatar */}
               <div
                 style={{
-                  width: 34,
-                  height: 34,
+                  width: 32,
+                  height: 32,
                   borderRadius: "50%",
-                  background: "linear-gradient(135deg, #fbbf24, #d97706)",
+                  background: "linear-gradient(145deg, #fde68a 0%, #f59e0b 45%, #b45309 100%)",
+                  border: "1px solid rgba(255,255,255,0.2)",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  boxShadow: "0 2px 10px rgba(251,191,36,0.3)",
                   flexShrink: 0,
+                  boxShadow: "0 2px 10px rgba(251,191,36,0.3)",
                 }}
               >
-                <Sparkles size={15} color="#0f0d0b" strokeWidth={2.5} />
+                <AdmitIcon size={15} />
               </div>
+
+              {/* Name + online status */}
               <div>
                 <div
                   style={{
                     fontSize: 13,
                     fontWeight: 700,
                     color: "#faf5ef",
-                    lineHeight: 1.2,
+                    lineHeight: 1.25,
                     letterSpacing: "-0.01em",
                   }}
                 >
@@ -503,64 +412,106 @@ export default function ChatBubble() {
                 </div>
                 <div
                   style={{
-                    fontSize: 10,
-                    color: "rgba(251,191,36,0.45)",
-                    fontWeight: 500,
-                    letterSpacing: "0.04em",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
                     marginTop: 1,
                   }}
                 >
-                  POWERED BY GROQ AI
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      background: "#4ade80",
+                    }}
+                  />
+                  <span
+                    style={{
+                      fontSize: 10,
+                      color: "#4ade80",
+                      fontWeight: 500,
+                      letterSpacing: "0.03em",
+                    }}
+                  >
+                    Online
+                  </span>
                 </div>
               </div>
             </div>
 
+            {/* Close button */}
             <button
-              onClick={triggerClose}
+              onClick={handleClose}
               aria-label="Close chat"
               style={{
-                background: "rgba(255,255,255,0.05)",
-                border: "1px solid rgba(255,255,255,0.07)",
-                color: "#555",
-                cursor: "pointer",
-                padding: 6,
-                display: "flex",
+                width: 30,
+                height: 30,
                 borderRadius: 8,
+                background: "rgba(255,255,255,0.05)",
+                border: "1px solid rgba(255,255,255,0.08)",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#555",
+                flexShrink: 0,
                 transition: "background 0.15s, color 0.15s, border-color 0.15s",
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = "rgba(239,68,68,0.12)";
+                e.currentTarget.style.background = "rgba(239,68,68,0.14)";
                 e.currentTarget.style.color = "#ef4444";
                 e.currentTarget.style.borderColor = "rgba(239,68,68,0.2)";
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.background = "rgba(255,255,255,0.05)";
                 e.currentTarget.style.color = "#555";
-                e.currentTarget.style.borderColor = "rgba(255,255,255,0.07)";
+                e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)";
               }}
             >
               <X size={14} />
             </button>
-          </div>
+          </header>
 
-          {/* Messages area */}
+          {/* ── Messages area ─────────────────────────────────────────────── */}
           <div
             style={{
               flex: 1,
               overflowY: "auto",
-              padding: "16px 14px",
+              padding: "14px 14px 4px",
               display: "flex",
               flexDirection: "column",
               gap: 10,
+              minHeight: 0, // critical: lets flex-child shrink below content size
             }}
           >
+            {/* Welcome / empty state */}
             {isEmpty && (
-              <EmptyState
-                name={profile.name}
-                onQuickQuestion={(q) => void sendMessage(q)}
-              />
+              <div
+                className="msg-in"
+                style={{
+                  textAlign: "center",
+                  padding: "20px 10px 10px",
+                }}
+              >
+                <div style={{ fontSize: 28, marginBottom: 10 }}>🎓</div>
+                <p
+                  style={{
+                    fontSize: 13,
+                    color: "#5a4a3a",
+                    lineHeight: 1.65,
+                    margin: 0,
+                  }}
+                >
+                  Hi{profile.name ? `, ${profile.name.split(" ")[0]}` : ""}!
+                  I&apos;m your AI admissions advisor. Ask me anything about
+                  your university options.
+                </p>
+              </div>
             )}
 
+            {/* Conversation messages */}
             {messages.map((msg, i) => (
               <MessageBubble
                 key={msg.id}
@@ -569,16 +520,18 @@ export default function ChatBubble() {
               />
             ))}
 
+            {/* Typing indicator (shown while waiting for first token) */}
             {loading && messages.at(-1)?.content === "" && <TypingDots />}
 
+            {/* Error */}
             {error && (
               <div
-                className="chat-msg-fade"
+                className="msg-in"
                 style={{
-                  padding: "10px 12px",
+                  padding: "9px 12px",
                   borderRadius: 10,
                   background: "rgba(239,68,68,0.07)",
-                  border: "1px solid rgba(239,68,68,0.14)",
+                  border: "1px solid rgba(239,68,68,0.13)",
                   fontSize: 12,
                   color: "#ef4444",
                   lineHeight: 1.5,
@@ -588,28 +541,77 @@ export default function ChatBubble() {
               </div>
             )}
 
-            <div ref={messagesEndRef} />
+            <div ref={messagesEndRef} style={{ height: 2 }} />
           </div>
 
-          {/* Input area */}
+          {/* ── Quick questions — horizontal scroll row ────────────────────── */}
+          <div
+            className="no-scrollbar"
+            style={{
+              display: "flex",
+              gap: 7,
+              padding: "9px 14px",
+              overflowX: "auto",
+              flexShrink: 0,
+              borderTop: "1px solid rgba(255,255,255,0.05)",
+            }}
+          >
+            {QUICK_QUESTIONS.map((q) => (
+              <button
+                key={q}
+                onClick={() => void sendMessage(q)}
+                disabled={loading}
+                style={{
+                  flexShrink: 0,
+                  padding: "5px 12px",
+                  borderRadius: 20,
+                  background: "rgba(251,191,36,0.07)",
+                  border: "1px solid rgba(251,191,36,0.14)",
+                  color: "#7a6a55",
+                  fontSize: 11.5,
+                  fontWeight: 500,
+                  cursor: loading ? "not-allowed" : "pointer",
+                  whiteSpace: "nowrap",
+                  fontFamily: "inherit",
+                  lineHeight: 1.4,
+                  transition: "background 0.12s, border-color 0.12s, color 0.12s",
+                }}
+                onMouseEnter={(e) => {
+                  if (!loading) {
+                    e.currentTarget.style.background = "rgba(251,191,36,0.13)";
+                    e.currentTarget.style.borderColor = "rgba(251,191,36,0.25)";
+                    e.currentTarget.style.color = "#fbbf24";
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "rgba(251,191,36,0.07)";
+                  e.currentTarget.style.borderColor = "rgba(251,191,36,0.14)";
+                  e.currentTarget.style.color = "#7a6a55";
+                }}
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+
+          {/* ── Input bar ─────────────────────────────────────────────────── */}
           <div
             style={{
-              padding: "12px 14px 14px",
-              borderTop: "1px solid rgba(255,255,255,0.055)",
+              padding: "10px 14px 14px",
+              borderTop: "1px solid rgba(255,255,255,0.06)",
               flexShrink: 0,
-              background: "rgba(0,0,0,0.12)",
             }}
           >
             <div
-              className="chat-input-wrap"
+              className="chat-input-row"
               style={{
                 display: "flex",
                 alignItems: "flex-end",
                 gap: 8,
                 background: "rgba(255,255,255,0.04)",
-                border: "1px solid rgba(255,255,255,0.08)",
+                border: "1px solid rgba(255,255,255,0.09)",
                 borderRadius: 12,
-                padding: "8px 10px 8px 12px",
+                padding: "8px 10px 8px 14px",
                 transition: "border-color 0.15s",
               }}
             >
@@ -619,12 +621,12 @@ export default function ChatBubble() {
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 onFocus={(e) => {
-                  const wrap = e.currentTarget.closest<HTMLElement>(".chat-input-wrap");
-                  if (wrap) wrap.style.borderColor = "rgba(251,191,36,0.22)";
+                  const row = e.currentTarget.closest<HTMLElement>(".chat-input-row");
+                  if (row) row.style.borderColor = "rgba(251,191,36,0.28)";
                 }}
                 onBlur={(e) => {
-                  const wrap = e.currentTarget.closest<HTMLElement>(".chat-input-wrap");
-                  if (wrap) wrap.style.borderColor = "rgba(255,255,255,0.08)";
+                  const row = e.currentTarget.closest<HTMLElement>(".chat-input-row");
+                  if (row) row.style.borderColor = "rgba(255,255,255,0.09)";
                 }}
                 placeholder="Ask anything about admissions…"
                 rows={1}
@@ -635,7 +637,8 @@ export default function ChatBubble() {
                   border: "none",
                   outline: "none",
                   color: "#faf5ef",
-                  fontSize: 13,
+                  // 16px minimum prevents iOS Safari auto-zoom on focus
+                  fontSize: 16,
                   fontFamily: "inherit",
                   resize: "none",
                   lineHeight: 1.5,
@@ -648,13 +651,13 @@ export default function ChatBubble() {
                 disabled={!input.trim() || loading}
                 aria-label="Send message"
                 style={{
-                  width: 32,
-                  height: 32,
+                  width: 34,
+                  height: 34,
                   borderRadius: 9,
                   background:
                     input.trim() && !loading
                       ? "linear-gradient(135deg, #fbbf24, #d97706)"
-                      : "rgba(255,255,255,0.05)",
+                      : "rgba(255,255,255,0.06)",
                   border: "none",
                   cursor: input.trim() && !loading ? "pointer" : "not-allowed",
                   display: "flex",
@@ -666,20 +669,20 @@ export default function ChatBubble() {
               >
                 {loading ? (
                   <Loader2
-                    size={14}
+                    size={15}
                     color="#555"
                     style={{ animation: "spin 1s linear infinite" }}
                   />
                 ) : (
-                  <Send size={14} color={input.trim() ? "#0f0d0b" : "#444"} />
+                  <Send size={15} color={input.trim() ? "#0f0d0b" : "#444"} />
                 )}
               </button>
             </div>
             <p
               style={{
                 fontSize: 10,
-                color: "rgba(255,255,255,0.12)",
-                margin: "6px 2px 0",
+                color: "rgba(255,255,255,0.1)",
+                margin: "5px 2px 0",
                 lineHeight: 1.4,
               }}
             >
@@ -694,77 +697,6 @@ export default function ChatBubble() {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function EmptyState({
-  name,
-  onQuickQuestion,
-}: {
-  name: string;
-  onQuickQuestion: (q: string) => void;
-}) {
-  return (
-    <div className="chat-msg-fade" style={{ textAlign: "center", paddingTop: 14 }}>
-      <div
-        style={{
-          fontSize: 34,
-          marginBottom: 12,
-          filter: "drop-shadow(0 3px 10px rgba(251,191,36,0.25))",
-        }}
-      >
-        🎓
-      </div>
-      <p
-        style={{
-          fontSize: 13,
-          color: "#6a5a4a",
-          lineHeight: 1.65,
-          margin: "0 0 18px",
-        }}
-      >
-        Hi{name ? `, ${name.split(" ")[0]}` : ""}! I&apos;m your AI admissions
-        advisor. Ask me anything about your university options.
-      </p>
-      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-        {QUICK_QUESTIONS.map((q) => (
-          <QuickChip key={q} label={q} onClick={() => onQuickQuestion(q)} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function QuickChip({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        padding: "9px 14px",
-        borderRadius: 10,
-        background: "rgba(251,191,36,0.05)",
-        border: "1px solid rgba(251,191,36,0.1)",
-        color: "#8a7a6a",
-        fontSize: 12,
-        fontWeight: 500,
-        cursor: "pointer",
-        fontFamily: "inherit",
-        textAlign: "left",
-        transition: "background 0.12s, border-color 0.12s, color 0.12s",
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = "rgba(251,191,36,0.1)";
-        e.currentTarget.style.borderColor = "rgba(251,191,36,0.22)";
-        e.currentTarget.style.color = "#fbbf24";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = "rgba(251,191,36,0.05)";
-        e.currentTarget.style.borderColor = "rgba(251,191,36,0.1)";
-        e.currentTarget.style.color = "#8a7a6a";
-      }}
-    >
-      {label}
-    </button>
-  );
-}
-
 function MessageBubble({
   message,
   isLatest,
@@ -777,16 +709,21 @@ function MessageBubble({
 
   return (
     <div
-      className={isLatest ? "chat-msg-fade" : undefined}
-      style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start" }}
+      className={isLatest ? "msg-in" : undefined}
+      style={{
+        display: "flex",
+        justifyContent: isUser ? "flex-end" : "flex-start",
+      }}
     >
       <div
         style={{
-          maxWidth: "85%",
-          padding: "10px 13px",
-          borderRadius: isUser ? "14px 14px 4px 14px" : "4px 14px 14px 14px",
+          maxWidth: "84%",
+          padding: "9px 13px",
+          borderRadius: isUser
+            ? "14px 14px 4px 14px"
+            : "4px 14px 14px 14px",
           background: isUser
-            ? "linear-gradient(135deg, rgba(251,191,36,0.16), rgba(217,119,6,0.1))"
+            ? "linear-gradient(135deg, rgba(251,191,36,0.15), rgba(217,119,6,0.1))"
             : "rgba(255,255,255,0.05)",
           border: isUser
             ? "1px solid rgba(251,191,36,0.18)"
@@ -804,61 +741,45 @@ function MessageBubble({
   );
 }
 
-// ─── Premium bubble icon ──────────────────────────────────────────────────────
+// ─── AdmitIcon — custom graduation cap SVG ───────────────────────────────────
+// A clean mortarboard icon: the diamond cap board + the arch beneath it.
+// Reads clearly at any size from 14px to 28px.
 
-function AIChatIcon() {
+function AdmitIcon({ size = 22 }: { size?: number }) {
   return (
     <svg
-      width="22"
-      height="22"
+      width={size}
+      height={size}
       viewBox="0 0 24 24"
       fill="none"
-      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
     >
-      {/* Back chat bubble — slightly recessed */}
-      <rect
-        x="1.5"
-        y="2"
-        width="13"
-        height="10"
-        rx="3"
-        fill="rgba(0,0,0,0.15)"
-        stroke="rgba(255,255,255,0.55)"
-        strokeWidth="1.2"
-      />
+      {/* Cap board — the iconic diamond flat top of a mortarboard */}
       <path
-        d="M4 12 L3 15.5 L7.5 13"
-        stroke="rgba(255,255,255,0.55)"
-        strokeWidth="1.2"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-        fill="none"
-      />
-      {/* Front chat bubble — main, brighter */}
-      <rect
-        x="9.5"
-        y="8"
-        width="13"
-        height="10"
-        rx="3"
-        fill="rgba(255,255,255,0.2)"
-        stroke="white"
-        strokeWidth="1.5"
-      />
-      <path
-        d="M20 18 L21 21.5 L17 19"
-        stroke="white"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-        fill="none"
-      />
-      {/* 4-pointed star sparkle inside front bubble */}
-      <path
-        d="M16 10.5 L16.65 12.35 L18.5 13 L16.65 13.65 L16 15.5 L15.35 13.65 L13.5 13 L15.35 12.35 Z"
+        d="M12 4L23 9.5L12 15L1 9.5L12 4Z"
         fill="white"
-        opacity="0.95"
+        fillOpacity="0.96"
       />
+      {/* Cap body — the arch beneath, suggesting the cap worn on the head */}
+      <path
+        d="M5.5 12V17C5.5 17 8 20.5 12 20.5C16 20.5 18.5 17 18.5 17V12"
+        stroke="white"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {/* Tassel string — the right side hanging element */}
+      <line
+        x1="23"
+        y1="9.5"
+        x2="23"
+        y2="15"
+        stroke="white"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+      />
+      {/* Tassel end — the hanging ball */}
+      <circle cx="23" cy="16.2" r="1.4" fill="white" fillOpacity="0.9" />
     </svg>
   );
 }
@@ -866,12 +787,12 @@ function AIChatIcon() {
 function TypingDots() {
   return (
     <div
-      className="chat-msg-fade"
+      className="msg-in"
       style={{
         display: "flex",
         alignItems: "center",
         gap: 5,
-        padding: "8px 12px",
+        padding: "9px 13px",
         borderRadius: "4px 14px 14px 14px",
         background: "rgba(255,255,255,0.05)",
         border: "1px solid rgba(255,255,255,0.06)",
@@ -879,15 +800,15 @@ function TypingDots() {
       }}
     >
       {[0, 1, 2].map((i) => (
-        <div
+        <span
           key={i}
           style={{
+            display: "inline-block",
             width: 6,
             height: 6,
             borderRadius: "50%",
-            background: "#fbbf24",
-            opacity: 0.35,
-            animation: "bounce-dot 1.3s ease-in-out infinite",
+            background: "#f59e0b",
+            animation: "dot-bounce 1.3s ease-in-out infinite",
             animationDelay: `${i * 0.18}s`,
           }}
         />
